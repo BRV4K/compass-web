@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: compass_web_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 3001
+      DATABASE_URL: ${DATABASE_URL:-postgres://compass_user:change-me@host.docker.internal:5432/compass_web}
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-secret}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '127.0.0.1:8080:3001'

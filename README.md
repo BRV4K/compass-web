@@ -90,6 +90,42 @@ server {
 sudo certbot --nginx -d compass-web.ru -d www.compass-web.ru
 ```
 
+## Production без Docker PostgreSQL
+
+Если сервер плохо тянет скачивание образа `postgres` или Docker Hub недоступен, можно использовать PostgreSQL, установленный на хосте.
+
+1. Установите PostgreSQL на сервер:
+
+```bash
+sudo apt update
+sudo apt install -y postgresql
+sudo systemctl enable --now postgresql
+```
+
+2. Создайте базу и пользователя:
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+CREATE USER compass_user WITH PASSWORD 'strong-password';
+CREATE DATABASE compass_web OWNER compass_user;
+\q
+```
+
+3. Создайте `.env` и укажите:
+
+```env
+DATABASE_URL=postgres://compass_user:strong-password@host.docker.internal:5432/compass_web
+```
+
+4. Запускайте только приложение:
+
+```bash
+docker compose -f docker-compose.hostdb.yml up --build -d
+```
+
 ## Тестовые учетные записи
 
 - `ogk078 / ogk / ogk078`
