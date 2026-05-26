@@ -15,7 +15,6 @@ import type {
 } from '../types.js'
 
 const schemaPath = path.join(rootDir, 'server', 'sql', 'schema.sql')
-
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/compass_web',
@@ -56,15 +55,15 @@ type ModelRow = {
   created_at: string
 }
 
-type CustomerAsset = {
+type CatalogAsset = {
   sectionName: string
   fileName: string
   sourcePath: string
   publicPath: string
 }
 
-const customerModelsDir = path.join(rootDir, 'веб приложение', 'модели')
-const customerBoxes = [
+const defaultSectionName = 'Без раздела'
+const defaultRecommendedBoxes = [
   'ЦСКИ.364651.020',
   'ЦСКИ.364651.036',
   'ЦСКИ.364651.315',
@@ -118,21 +117,11 @@ export function toPublicUser(user: User): PublicUser {
   return publicUser
 }
 
-function normalizeSegment(value: string) {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9а-яА-Я]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase()
-}
-
 function makeModelCode(name: string) {
   const normalized = name
     .trim()
     .toUpperCase()
-    .replace(/[^A-ZA-Я0-9]+/g, '-')
+    .replace(/[^A-ZА-Я0-9]+/g, '-')
     .replace(/-{2,}/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 40)
@@ -175,13 +164,18 @@ function makeDimensions(seed: string) {
     heightMm,
     weightKg,
     dimensions: `${lengthMm}×${widthMm}×${heightMm} мм`,
-    recommendedBox: customerBoxes[codePoints % customerBoxes.length],
+    recommendedBox: defaultRecommendedBoxes[codePoints % defaultRecommendedBoxes.length],
   }
 }
 
-async function listCustomerAssets() {
+function toPublicModelPath(sourcePath: string) {
+  const relativePath = path.relative(publicModelsDir, sourcePath)
+  return `/models/${relativePath.split(path.sep).join('/')}`
+}
+
+async function listCatalogAssets() {
   const sourceExists = await fs
-    .access(customerModelsDir)
+    .access(publicModelsDir)
     .then(() => true)
     .catch(() => false)
 
@@ -189,42 +183,38 @@ async function listCustomerAssets() {
     return []
   }
 
-  const directoryEntries = await fs.readdir(customerModelsDir, { withFileTypes: true })
-  const assets: CustomerAsset[] = []
+  const assets: CatalogAsset[] = []
 
-  for (const entry of directoryEntries) {
-    if (!entry.isDirectory()) {
-      continue
-    }
+  async function walkDirectory(currentDir: string, sectionName = defaultSectionName) {
+    const entries = await fs.readdir(currentDir, { withFileTypes: true })
 
-    const sectionDir = path.join(customerModelsDir, entry.name)
-    const files = await fs.readdir(sectionDir, { withFileTypes: true })
+    for (const entry of entries) {
+      const sourcePath = path.join(currentDir, entry.name)
 
-    for (const file of files) {
-      if (!file.isFile() || path.extname(file.name).toLowerCase() !== '.stl') {
+      if (entry.isDirectory()) {
+        const nextSectionName = currentDir === publicModelsDir ? entry.name : sectionName
+        await walkDirectory(sourcePath, nextSectionName)
         continue
       }
 
-      const sectionSlug = normalizeSegment(entry.name)
-      const fileSlug = normalizeSegment(path.basename(file.name, '.stl'))
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.stl') {
+        continue
+      }
+
       assets.push({
-        sectionName: entry.name,
-        fileName: file.name,
-        sourcePath: path.join(sectionDir, file.name),
-        publicPath: `/models/1rl131r/${sectionSlug}/${fileSlug}.stl`,
+        sectionName,
+        fileName: entry.name,
+        sourcePath,
+        publicPath: toPublicModelPath(sourcePath),
       })
     }
   }
 
+  await walkDirectory(publicModelsDir)
+
   return assets.sort((left, right) =>
     `${left.sectionName}/${left.fileName}`.localeCompare(`${right.sectionName}/${right.fileName}`, 'ru'),
   )
-}
-
-async function ensureCustomerPublicAsset(asset: CustomerAsset) {
-  const targetPath = path.join(publicModelsDir, asset.publicPath.replace('/models/', ''))
-  await fs.mkdir(path.dirname(targetPath), { recursive: true })
-  await fs.copyFile(asset.sourcePath, targetPath)
 }
 
 export async function ensureStorage() {
@@ -233,13 +223,14 @@ export async function ensureStorage() {
   const schema = await fs.readFile(schemaPath, 'utf8')
   await pool.query(schema)
   await seedDatabase()
-  await importCustomerCatalog()
+  await importDefaultCatalog()
 }
 
 async function seedDatabase() {
   const createdAt = new Date().toISOString()
   const adminPasswordHash = await bcrypt.hash('oyit023', 10)
   const userPasswordHash = await bcrypt.hash('ogk078', 10)
+
   await pool.query(
     `
       insert into users (id, login, subdivision, name, role, password_hash, created_at)
@@ -267,8 +258,8 @@ async function seedDatabase() {
   )
 }
 
-async function importCustomerCatalog() {
-  const assets = await listCustomerAssets()
+async function importDefaultCatalog() {
+  const assets = await listCatalogAssets()
 
   if (assets.length === 0) {
     return
@@ -279,11 +270,11 @@ async function importCustomerCatalog() {
   const sectionIds = new Map<string, string>(
     existingSections.map((section) => [section.name, section.id]),
   )
+  const modelPaths = new Set(existingModels.map((model) => model.modelPath))
 
   for (const asset of assets) {
-    await ensureCustomerPublicAsset(asset)
-
     let sectionId = sectionIds.get(asset.sectionName)
+
     if (!sectionId) {
       sectionId = randomUUID()
       sectionIds.set(asset.sectionName, sectionId)
@@ -296,15 +287,11 @@ async function importCustomerCatalog() {
       )
     }
 
-    const modelName = path.basename(asset.fileName, path.extname(asset.fileName)).replace(/_/g, ' ')
-    const existingModel = existingModels.find(
-      (candidate) => candidate.sectionId === sectionId && candidate.sourceFileName === asset.fileName,
-    )
-
-    if (existingModel) {
+    if (modelPaths.has(asset.publicPath)) {
       continue
     }
 
+    const modelName = path.basename(asset.fileName, path.extname(asset.fileName)).replace(/_/g, ' ')
     const generated = makeDimensions(`${asset.sectionName}:${modelName}`)
     const extracted = await extractStlMetricsFromFile(asset.sourcePath).catch(() => null)
     const lengthMm = extracted?.lengthMm ?? generated.lengthMm
@@ -338,6 +325,8 @@ async function importCustomerCatalog() {
         new Date().toISOString(),
       ],
     )
+
+    modelPaths.add(asset.publicPath)
   }
 }
 
@@ -351,21 +340,17 @@ export async function findUserByLogin(login: string, subdivision?: 'ogk' | 'oyit
     `,
     [login, subdivision ?? null],
   )
+
   return result.rows[0] ? mapUser(result.rows[0]) : null
 }
 
 export async function findUserById(userId: string) {
-  const result = await pool.query<UserRow>(
-    'select * from users where id = $1',
-    [userId],
-  )
+  const result = await pool.query<UserRow>('select * from users where id = $1', [userId])
   return result.rows[0] ? mapUser(result.rows[0]) : null
 }
 
 export async function listUsers() {
-  const result = await pool.query<UserRow>(
-    'select * from users order by created_at asc',
-  )
+  const result = await pool.query<UserRow>('select * from users order by created_at asc')
   return result.rows.map(mapUser)
 }
 
@@ -424,9 +409,7 @@ export async function deleteUser(userId: string) {
 }
 
 export async function countAdmins() {
-  const result = await pool.query<{ count: string }>(
-    "select count(*) from users where role = 'admin'",
-  )
+  const result = await pool.query<{ count: string }>("select count(*) from users where role = 'admin'")
   return Number(result.rows[0].count)
 }
 
@@ -447,21 +430,17 @@ export async function userLoginTaken(
     `,
     [login, subdivision, excludeUserId ?? null],
   )
+
   return result.rows[0].exists
 }
 
 export async function listSections() {
-  const result = await pool.query<SectionRow>(
-    'select * from sections order by created_at asc',
-  )
+  const result = await pool.query<SectionRow>('select * from sections order by created_at asc')
   return result.rows.map(mapSection)
 }
 
 export async function findSectionById(sectionId: string) {
-  const result = await pool.query<SectionRow>(
-    'select * from sections where id = $1',
-    [sectionId],
-  )
+  const result = await pool.query<SectionRow>('select * from sections where id = $1', [sectionId])
   return result.rows[0] ? mapSection(result.rows[0]) : null
 }
 
@@ -474,6 +453,7 @@ export async function createSection(name: string) {
     `,
     [randomUUID(), name, new Date().toISOString()],
   )
+
   return mapSection(result.rows[0])
 }
 
@@ -487,6 +467,7 @@ export async function updateSection(sectionId: string, name: string) {
     `,
     [sectionId, name],
   )
+
   return result.rows[0] ? mapSection(result.rows[0]) : null
 }
 
@@ -495,17 +476,12 @@ export async function deleteSection(sectionId: string) {
 }
 
 export async function listModels() {
-  const result = await pool.query<ModelRow>(
-    'select * from models order by created_at asc',
-  )
+  const result = await pool.query<ModelRow>('select * from models order by created_at asc')
   return result.rows.map(mapModel)
 }
 
 export async function findModelById(modelId: string) {
-  const result = await pool.query<ModelRow>(
-    'select * from models where id = $1',
-    [modelId],
-  )
+  const result = await pool.query<ModelRow>('select * from models where id = $1', [modelId])
   return result.rows[0] ? mapModel(result.rows[0]) : null
 }
 
@@ -553,6 +529,7 @@ export async function createModel(input: {
       new Date().toISOString(),
     ],
   )
+
   return mapModel(result.rows[0])
 }
 
@@ -614,6 +591,7 @@ export async function updateModel(
       input.sourceFileName ?? null,
     ],
   )
+
   return result.rows[0] ? mapModel(result.rows[0]) : null
 }
 
@@ -640,13 +618,11 @@ export async function filePathReferenced(modelPath: string, excludeModelId?: str
 export async function listSectionsWithModels(): Promise<Array<Section & { models: CatalogModel[] }>> {
   const [sections, models] = await Promise.all([listSections(), listModels()])
 
-  return sections.map((section: Section) => ({
+  return sections.map((section) => ({
     ...section,
     models: models
-      .filter((model: CatalogModel) => model.sectionId === section.id)
-      .sort((left: CatalogModel, right: CatalogModel) =>
-        left.name.localeCompare(right.name, 'ru'),
-      ),
+      .filter((model) => model.sectionId === section.id)
+      .sort((left, right) => left.name.localeCompare(right.name, 'ru')),
   }))
 }
 

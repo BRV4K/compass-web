@@ -31,7 +31,7 @@ services:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/compass_web
       JWT_SECRET: compass-web-demo-secret
     ports:
-      - '8080:3001'
+      - '8081:3001'
 
 volumes:
   postgres_data:
