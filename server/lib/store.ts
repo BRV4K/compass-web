@@ -252,7 +252,7 @@ async function seedDatabase() {
       randomUUID(),
       'oyit023',
       'oyit',
-      'Администратор ОЙИТ-023',
+      'Администратор ОУИТ-023',
       'admin',
       adminPasswordHash,
       createdAt,

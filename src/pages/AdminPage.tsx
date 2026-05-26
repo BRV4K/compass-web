@@ -161,7 +161,7 @@ export function AdminPage() {
       <div className="hero-card">
         <span className="eyebrow">Admin</span>
         <h1>Управление пользователями и каталогом</h1>
-        <p>Администратор ОЙИТ управляет пользователями, разделами и загружает STL-модели для станции 1РЛ131Р.</p>
+        <p>Администратор ОУИТ управляет пользователями, разделами и загружает STL-модели для станции 1РЛ131Р.</p>
       </div>
 
       {error ? <div className="form-error">{error}</div> : null}
