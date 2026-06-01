@@ -15,6 +15,7 @@ import type {
 } from '../types.js'
 
 const schemaPath = path.join(rootDir, 'server', 'sql', 'schema.sql')
+const catalogRootDir = path.join(publicModelsDir, '1РЛ131Р')
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/compass_web',
@@ -62,7 +63,6 @@ type CatalogAsset = {
   publicPath: string
 }
 
-const defaultSectionName = 'Без раздела'
 const defaultRecommendedBoxes = [
   'ЦСКИ.364651.020',
   'ЦСКИ.364651.036',
@@ -175,7 +175,7 @@ function toPublicModelPath(sourcePath: string) {
 
 async function listCatalogAssets() {
   const sourceExists = await fs
-    .access(publicModelsDir)
+    .access(catalogRootDir)
     .then(() => true)
     .catch(() => false)
 
@@ -184,33 +184,31 @@ async function listCatalogAssets() {
   }
 
   const assets: CatalogAsset[] = []
+  const sectionEntries = await fs.readdir(catalogRootDir, { withFileTypes: true })
 
-  async function walkDirectory(currentDir: string, sectionName = defaultSectionName) {
-    const entries = await fs.readdir(currentDir, { withFileTypes: true })
+  for (const sectionEntry of sectionEntries) {
+    if (!sectionEntry.isDirectory()) {
+      continue
+    }
 
-    for (const entry of entries) {
-      const sourcePath = path.join(currentDir, entry.name)
+    const sectionName = sectionEntry.name
+    const sectionDir = path.join(catalogRootDir, sectionName)
+    const fileEntries = await fs.readdir(sectionDir, { withFileTypes: true })
 
-      if (entry.isDirectory()) {
-        const nextSectionName = currentDir === publicModelsDir ? entry.name : sectionName
-        await walkDirectory(sourcePath, nextSectionName)
+    for (const fileEntry of fileEntries) {
+      if (!fileEntry.isFile() || path.extname(fileEntry.name).toLowerCase() !== '.stl') {
         continue
       }
 
-      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.stl') {
-        continue
-      }
-
+      const sourcePath = path.join(sectionDir, fileEntry.name)
       assets.push({
         sectionName,
-        fileName: entry.name,
+        fileName: fileEntry.name,
         sourcePath,
         publicPath: toPublicModelPath(sourcePath),
       })
     }
   }
-
-  await walkDirectory(publicModelsDir)
 
   return assets.sort((left, right) =>
     `${left.sectionName}/${left.fileName}`.localeCompare(`${right.sectionName}/${right.fileName}`, 'ru'),
@@ -219,9 +217,11 @@ async function listCatalogAssets() {
 
 export async function ensureStorage() {
   await fs.mkdir(publicModelsDir, { recursive: true })
+  await fs.mkdir(catalogRootDir, { recursive: true })
 
   const schema = await fs.readFile(schemaPath, 'utf8')
   await pool.query(schema)
+  await pool.query('delete from sections')
   await seedDatabase()
   await importDefaultCatalog()
 }
