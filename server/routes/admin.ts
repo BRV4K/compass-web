@@ -1,8 +1,8 @@
-import fs from 'node:fs/promises'
+﻿import fs from 'node:fs/promises'
 import path from 'node:path'
 import bcrypt from 'bcryptjs'
 import { Router } from 'express'
-import { publicModelsDir } from '../lib/constants.js'
+import { catalogRootDir, publicModelsDir } from '../lib/constants.js'
 import { extractStlMetricsFromFile } from '../lib/stl.js'
 import {
   countAdmins,
@@ -26,11 +26,30 @@ import {
 import { uploadModel } from '../lib/upload.js'
 import type { ModelPrimitive, UserRole } from '../types.js'
 
+function resolveStoredModelPath(publicPath: string) {
+  return path.join(publicModelsDir, publicPath.replace(/^\/models\//, ''))
+}
+
+function resolveCatalogModelPath(sectionName: string, filename: string) {
+  return path.join(catalogRootDir, sectionName, filename)
+}
+
+function toPublicModelPath(filePath: string) {
+  const relativePath = path.relative(publicModelsDir, filePath)
+  return `/models/${relativePath.split(path.sep).join('/')}`
+}
+
+async function moveUploadedModelFile(sourcePath: string, targetPath: string) {
+  await fs.mkdir(path.dirname(targetPath), { recursive: true })
+  await fs.rm(targetPath, { force: true })
+  await fs.rename(sourcePath, targetPath)
+}
+
 function makeModelCode(name: string) {
   const normalized = name
     .trim()
     .toUpperCase()
-    .replace(/[^A-ZA-Я0-9]+/g, '-')
+    .replace(/[^\p{L}0-9]+/gu, '-')
     .replace(/-{2,}/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 40)
@@ -41,11 +60,11 @@ function makeModelCode(name: string) {
 function guessPrimitive(filename: string): ModelPrimitive {
   const lower = filename.toLowerCase()
 
-  if (lower.includes('опор') || lower.includes('support')) {
+  if (lower.includes('РѕРїРѕСЂ') || lower.includes('support')) {
     return 'support'
   }
 
-  if (lower.includes('radar') || lower.includes('антенн')) {
+  if (lower.includes('radar') || lower.includes('Р°РЅС‚РµРЅРЅ')) {
     return 'radar'
   }
 
@@ -57,11 +76,11 @@ function guessPrimitive(filename: string): ModelPrimitive {
 }
 
 const recommendedBoxes = [
-  'ЦСКИ.364651.020',
-  'ЦСКИ.364651.036',
-  'ЦСКИ.364651.315',
-  'Э6.17.18.0011',
-  'Э8.23.18.0204-01',
+  'Р¦РЎРљР.364651.020',
+  'Р¦РЎРљР.364651.036',
+  'Р¦РЎРљР.364651.315',
+  'Р­6.17.18.0011',
+  'Р­8.23.18.0204-01',
 ]
 
 function generateModelMetadata(seed: string) {
@@ -76,7 +95,7 @@ function generateModelMetadata(seed: string) {
     widthMm,
     heightMm,
     weightKg,
-    dimensions: `${lengthMm}×${widthMm}×${heightMm} мм`,
+    dimensions: `${lengthMm}Г—${widthMm}Г—${heightMm} РјРј`,
     recommendedBox: recommendedBoxes[codePoints % recommendedBoxes.length],
   }
 }
@@ -118,7 +137,7 @@ async function resolveModelMetadata(input: {
     heightMm,
     weightKg,
     recommendedBox,
-    dimensions: `${lengthMm}×${widthMm}×${heightMm} мм`,
+    dimensions: `${lengthMm}Г—${widthMm}Г—${heightMm} РјРј`,
   }
 }
 
@@ -137,12 +156,12 @@ adminRouter.post('/users', async (req, res) => {
   const role = (req.body.role ?? 'user') as UserRole
 
   if (!login || !password || !name || !['admin', 'user'].includes(role) || !['ogk', 'oyit'].includes(subdivision)) {
-    res.status(400).json({ error: 'Нужно указать логин, подразделение, пароль, имя и роль.' })
+    res.status(400).json({ error: 'РќСѓР¶РЅРѕ СѓРєР°Р·Р°С‚СЊ Р»РѕРіРёРЅ, РїРѕРґСЂР°Р·РґРµР»РµРЅРёРµ, РїР°СЂРѕР»СЊ, РёРјСЏ Рё СЂРѕР»СЊ.' })
     return
   }
 
   if (await userLoginTaken(login, subdivision)) {
-    res.status(409).json({ error: 'Пользователь с таким логином в этом подразделении уже существует.' })
+    res.status(409).json({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃ С‚Р°РєРёРј Р»РѕРіРёРЅРѕРј РІ СЌС‚РѕРј РїРѕРґСЂР°Р·РґРµР»РµРЅРёРё СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚.' })
     return
   }
 
@@ -160,7 +179,7 @@ adminRouter.patch('/users/:userId', async (req, res) => {
   const user = await findUserById(req.params.userId)
 
   if (!user) {
-    res.status(404).json({ error: 'Пользователь не найден.' })
+    res.status(404).json({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ.' })
     return
   }
 
@@ -171,12 +190,12 @@ adminRouter.patch('/users/:userId', async (req, res) => {
   const password = String(req.body.password ?? '')
 
   if (!login || !name || !['admin', 'user'].includes(role) || !['ogk', 'oyit'].includes(subdivision)) {
-    res.status(400).json({ error: 'Проверьте логин, подразделение, имя и роль.' })
+    res.status(400).json({ error: 'РџСЂРѕРІРµСЂСЊС‚Рµ Р»РѕРіРёРЅ, РїРѕРґСЂР°Р·РґРµР»РµРЅРёРµ, РёРјСЏ Рё СЂРѕР»СЊ.' })
     return
   }
 
   if (await userLoginTaken(login, subdivision, user.id)) {
-    res.status(409).json({ error: 'Логин уже занят.' })
+    res.status(409).json({ error: 'Р›РѕРіРёРЅ СѓР¶Рµ Р·Р°РЅСЏС‚.' })
     return
   }
 
@@ -195,14 +214,14 @@ adminRouter.delete('/users/:userId', async (req, res) => {
   const user = await findUserById(req.params.userId)
 
   if (!user) {
-    res.status(404).json({ error: 'Пользователь не найден.' })
+    res.status(404).json({ error: 'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ.' })
     return
   }
 
   const adminCount = await countAdmins()
 
   if (user.role === 'admin' && adminCount < 2) {
-    res.status(400).json({ error: 'Нельзя удалить последнего администратора.' })
+    res.status(400).json({ error: 'РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РїРѕСЃР»РµРґРЅРµРіРѕ Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°.' })
     return
   }
 
@@ -214,7 +233,7 @@ adminRouter.post('/sections', async (req, res) => {
   const name = String(req.body.name ?? '').trim()
 
   if (!name) {
-    res.status(400).json({ error: 'Название раздела обязательно.' })
+    res.status(400).json({ error: 'РќР°Р·РІР°РЅРёРµ СЂР°Р·РґРµР»Р° РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ.' })
     return
   }
 
@@ -226,14 +245,14 @@ adminRouter.patch('/sections/:sectionId', async (req, res) => {
   const section = await findSectionById(req.params.sectionId)
 
   if (!section) {
-    res.status(404).json({ error: 'Раздел не найден.' })
+    res.status(404).json({ error: 'Р Р°Р·РґРµР» РЅРµ РЅР°Р№РґРµРЅ.' })
     return
   }
 
   const name = String(req.body.name ?? '').trim()
 
   if (!name) {
-    res.status(400).json({ error: 'Название раздела обязательно.' })
+    res.status(400).json({ error: 'РќР°Р·РІР°РЅРёРµ СЂР°Р·РґРµР»Р° РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ.' })
     return
   }
 
@@ -245,7 +264,7 @@ adminRouter.delete('/sections/:sectionId', async (req, res) => {
   const section = await findSectionById(req.params.sectionId)
 
   if (!section) {
-    res.status(404).json({ error: 'Раздел не найден.' })
+    res.status(404).json({ error: 'Р Р°Р·РґРµР» РЅРµ РЅР°Р№РґРµРЅ.' })
     return
   }
 
@@ -257,8 +276,9 @@ adminRouter.post('/models', uploadModel.single('modelFile'), async (req, res) =>
   const sectionId = String(req.body.sectionId ?? '').trim()
   const name = String(req.body.name ?? '').trim()
   const description = String(req.body.description ?? '').trim()
+  const section = await findSectionById(sectionId)
 
-  if (!(await findSectionById(sectionId))) {
+  if (!section) {
     res.status(400).json({ error: 'Укажите существующий раздел.' })
     return
   }
@@ -268,10 +288,12 @@ adminRouter.post('/models', uploadModel.single('modelFile'), async (req, res) =>
     return
   }
 
-  const uploadedFilePath = path.join(publicModelsDir, req.file.filename)
+  const targetPath = resolveCatalogModelPath(section.name, req.file.filename)
+  await moveUploadedModelFile(req.file.path, targetPath)
+
   const resolved = await resolveModelMetadata({
     seed: `${sectionId}:${name}:${req.file.originalname}`,
-    uploadedFilePath,
+    uploadedFilePath: targetPath,
     lengthMm: toOptionalNumber(req.body.lengthMm),
     widthMm: toOptionalNumber(req.body.widthMm),
     heightMm: toOptionalNumber(req.body.heightMm),
@@ -290,7 +312,7 @@ adminRouter.post('/models', uploadModel.single('modelFile'), async (req, res) =>
     material: '',
     weightKg: resolved.weightKg,
     recommendedBox: resolved.recommendedBox,
-    modelPath: `/models/${req.file.filename}`,
+    modelPath: toPublicModelPath(targetPath),
     sourceFileName: req.file.originalname,
     primitive: guessPrimitive(req.file.originalname),
   })
@@ -307,18 +329,24 @@ adminRouter.patch('/models/:modelId', uploadModel.single('modelFile'), async (re
   }
 
   const sectionId = String(req.body.sectionId ?? model.sectionId).trim()
+  const section = await findSectionById(sectionId)
 
-  if (!(await findSectionById(sectionId))) {
+  if (!section) {
     res.status(400).json({ error: 'Укажите существующий раздел.' })
     return
   }
 
-  const nextModelPath = req.file ? `/models/${req.file.filename}` : undefined
-  const nextSourceFileName = req.file ? req.file.originalname : undefined
   const nextName = String(req.body.name ?? model.name).trim()
+  const nextSourceFileName = req.file ? req.file.originalname : undefined
+  const targetPath = req.file ? resolveCatalogModelPath(section.name, req.file.filename) : undefined
+
+  if (req.file && targetPath) {
+    await moveUploadedModelFile(req.file.path, targetPath)
+  }
+
   const resolved = await resolveModelMetadata({
     seed: `${sectionId}:${nextName}:${nextSourceFileName ?? model.sourceFileName}`,
-    uploadedFilePath: req.file ? path.join(publicModelsDir, req.file.filename) : undefined,
+    uploadedFilePath: targetPath,
     lengthMm: toOptionalNumber(req.body.lengthMm) ?? model.lengthMm,
     widthMm: toOptionalNumber(req.body.widthMm) ?? model.widthMm,
     heightMm: toOptionalNumber(req.body.heightMm) ?? model.heightMm,
@@ -338,12 +366,12 @@ adminRouter.patch('/models/:modelId', uploadModel.single('modelFile'), async (re
     weightKg: resolved.weightKg,
     recommendedBox: resolved.recommendedBox,
     primitive: req.file ? guessPrimitive(req.file.originalname) : model.primitive,
-    modelPath: nextModelPath,
+    modelPath: targetPath ? toPublicModelPath(targetPath) : undefined,
     sourceFileName: nextSourceFileName,
   })
 
   if (req.file && !(await filePathReferenced(model.modelPath, model.id))) {
-    await fs.rm(path.join(publicModelsDir, path.basename(model.modelPath)), { force: true })
+    await fs.rm(resolveStoredModelPath(model.modelPath), { force: true })
   }
 
   res.json({ model: updatedModel ?? model })
@@ -360,7 +388,7 @@ adminRouter.delete('/models/:modelId', async (req, res) => {
   await deleteModel(model.id)
 
   if (!(await filePathReferenced(model.modelPath))) {
-    await fs.rm(path.join(publicModelsDir, path.basename(model.modelPath)), { force: true })
+    await fs.rm(resolveStoredModelPath(model.modelPath), { force: true })
   }
 
   res.status(204).end()

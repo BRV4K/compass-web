@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+﻿import { randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import bcrypt from 'bcryptjs'
@@ -64,11 +64,11 @@ type CatalogAsset = {
 }
 
 const defaultRecommendedBoxes = [
-  'ЦСКИ.364651.020',
-  'ЦСКИ.364651.036',
-  'ЦСКИ.364651.315',
-  'Э6.17.18.0011',
-  'Э8.23.18.0204-01',
+  'Р¦РЎРљР.364651.020',
+  'Р¦РЎРљР.364651.036',
+  'Р¦РЎРљР.364651.315',
+  'Р­6.17.18.0011',
+  'Р­8.23.18.0204-01',
 ]
 
 function mapUser(row: UserRow): User {
@@ -121,7 +121,7 @@ function makeModelCode(name: string) {
   const normalized = name
     .trim()
     .toUpperCase()
-    .replace(/[^A-ZА-Я0-9]+/g, '-')
+    .replace(/[^\p{L}0-9]+/gu, '-')
     .replace(/-{2,}/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 40)
@@ -132,15 +132,15 @@ function makeModelCode(name: string) {
 function guessPrimitive(filename: string): ModelPrimitive {
   const lower = filename.toLowerCase()
 
-  if (lower.includes('швеллер') || lower.includes('опор')) {
+  if (lower.includes('С€РІРµР»Р»РµСЂ') || lower.includes('РѕРїРѕСЂ')) {
     return 'support'
   }
 
-  if (lower.includes('розетк')) {
+  if (lower.includes('СЂРѕР·РµС‚Рє')) {
     return 'cylinder'
   }
 
-  if (lower.includes('антенн') || lower.includes('радар')) {
+  if (lower.includes('Р°РЅС‚РµРЅРЅ') || lower.includes('СЂР°РґР°СЂ')) {
     return 'radar'
   }
 
@@ -148,7 +148,7 @@ function guessPrimitive(filename: string): ModelPrimitive {
 }
 
 function makeDescription(sectionName: string, modelName: string) {
-  return `${modelName} из раздела «${sectionName}» для станции 1РЛ131Р.`
+  return `${modelName} РёР· СЂР°Р·РґРµР»Р° В«${sectionName}В» РґР»СЏ СЃС‚Р°РЅС†РёРё 1Р Р›131Р .`
 }
 
 function makeDimensions(seed: string) {
@@ -163,7 +163,7 @@ function makeDimensions(seed: string) {
     widthMm,
     heightMm,
     weightKg,
-    dimensions: `${lengthMm}×${widthMm}×${heightMm} мм`,
+    dimensions: `${lengthMm}Г—${widthMm}Г—${heightMm} РјРј`,
     recommendedBox: defaultRecommendedBoxes[codePoints % defaultRecommendedBoxes.length],
   }
 }
@@ -221,7 +221,6 @@ export async function ensureStorage() {
 
   const schema = await fs.readFile(schemaPath, 'utf8')
   await pool.query(schema)
-  await pool.query('delete from sections')
   await seedDatabase()
   await importDefaultCatalog()
 }
@@ -243,14 +242,14 @@ async function seedDatabase() {
       randomUUID(),
       'oyit023',
       'oyit',
-      'Администратор ОУИТ-023',
+      'РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ РћРЈРРў-023',
       'admin',
       adminPasswordHash,
       createdAt,
       randomUUID(),
       'ogk078',
       'ogk',
-      'Пользователь ОГК-078',
+      'РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РћР“Рљ-078',
       'user',
       userPasswordHash,
       createdAt,
@@ -312,7 +311,7 @@ async function importDefaultCatalog() {
         modelName,
         makeModelCode(modelName),
         makeDescription(asset.sectionName, modelName),
-        `${lengthMm}×${widthMm}×${heightMm} мм`,
+        `${lengthMm}Г—${widthMm}Г—${heightMm} РјРј`,
         lengthMm,
         widthMm,
         heightMm,
